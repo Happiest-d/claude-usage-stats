@@ -8,9 +8,11 @@ import * as concurrency from '../src/commands/concurrency.js';
 import * as gitStats from '../src/commands/git.js';
 import * as report from '../src/commands/report.js';
 import * as stats from '../src/commands/stats.js';
+import * as summary from '../src/commands/summary.js';
 import * as weekly from '../src/commands/weekly.js';
 
 const COMMANDS = {
+  summary: { run: summary.run, help: 'всё одним блоком: часы, параллелизм, токены, коммиты' },
   stats: { run: stats.run, help: 'сводка за период: токены, запросы, инструменты, дни' },
   concurrency: { run: concurrency.run, help: 'параллелизм: агент-часы, календарное время, пик' },
   report: { run: report.run, help: 'HTML-дашборд по неделям (пн–пт) в файл' },
@@ -51,7 +53,7 @@ ${Object.entries(COMMANDS).map(([name, c]) => `  ${name.padEnd(13)} ${c.help}`).
   --month [YYYY-MM]       месяц целиком (без значения — текущий)
 
 Опции:
-  --json                  выдать JSON вместо текстового отчёта (stats, concurrency)
+  --json                  выдать JSON вместо текстового отчёта (summary, stats, concurrency)
   --repo PATH             репозиторий для статистики коммитов (можно несколько)
   --email ADDR            email автора коммитов (по умолчанию user.email репозитория)
   -o, --out FILE          куда писать дашборд (по умолчанию dashboard.html)
@@ -62,6 +64,7 @@ ${Object.entries(COMMANDS).map(([name, c]) => `  ${name.padEnd(13)} ${c.help}`).
   -v, --version           версия
 
 Примеры:
+  npx github:Happiest-d/claude-usage-stats summary --month 2026-07 --repo ~/projects/api
   npx github:Happiest-d/claude-usage-stats stats --last-week
   npx github:Happiest-d/claude-usage-stats concurrency 2026-07-20 2026-07-24
   npx github:Happiest-d/claude-usage-stats report --month 2026-07 --repo ~/projects/api -o july.html

@@ -8,36 +8,33 @@
  *            с родительской сессией: у них общий sessionId);
  *   агенты — то же, но каждый субагент считается отдельно.
  */
-import { iterRecords } from '../logs.js';
-import { eventKind, gapIntervals, sessionIntervals, summarize } from '../metrics.js';
-import { fixed, padStart, periodLine } from '../format.js';
+import { aggregate } from '../aggregate.js';
+import { gapIntervals, sessionIntervals, summarize } from '../metrics.js';
+import { fixed, periodLine } from '../format.js';
+import { table } from '../table.js';
 
-function push(map, key, value) {
-  const list = map.get(key);
-  if (list) list.push(value);
-  else map.set(key, [value]);
+/** Интервалы работы: [по сессиям, по всем агентам] для группы. */
+export function intervalsOf(agg, ctx, group = '') {
+  const sessionIv = [...(agg.sessionEvents.get(group) ?? new Map()).values()]
+    .flatMap((events) => sessionIntervals(events, ctx.idleGap));
+  const agentIv = [...(agg.agentTimes.get(group) ?? new Map()).values()]
+    .flatMap((times) => gapIntervals(times, ctx.idleGap));
+  return [sessionIv, agentIv];
 }
 
-export async function collect(ctx) {
-  const sessionEvents = new Map(); // sessionId -> [[время, вид]]
-  const agentTimes = new Map(); // сессия или файл субагента -> [время]
-
-  for await (const rec of iterRecords(ctx.files(), ctx.start, ctx.end)) {
-    if (!rec.sessionId) continue;
-    push(sessionEvents, rec.sessionId, [rec.t, eventKind(rec)]);
-    push(agentTimes, rec.isSubagent ? rec.file : rec.sessionId, rec.t);
-  }
-
-  const sessionIv = [...sessionEvents.values()].flatMap((ev) => sessionIntervals(ev, ctx.idleGap));
-  const agentIv = [...agentTimes.values()].flatMap((ts) => gapIntervals(ts, ctx.idleGap));
+export function shape(ctx, agg) {
+  const [sessionIv, agentIv] = intervalsOf(agg, ctx);
 
   const byDay = new Map();
-  for (const [a, b] of sessionIv) push(byDay, ctx.clock.day(a), [a, b]);
+  for (const [a, b] of sessionIv) {
+    const day = ctx.clock.day(a);
+    const list = byDay.get(day);
+    if (list) list.push([a, b]);
+    else byDay.set(day, [[a, b]]);
+  }
 
   const dailySessions = {};
-  for (const day of [...byDay.keys()].sort()) {
-    dailySessions[day] = summarize(byDay.get(day));
-  }
+  for (const day of [...byDay.keys()].sort()) dailySessions[day] = summarize(byDay.get(day));
 
   return {
     window: ctx.window(),
@@ -47,36 +44,50 @@ export async function collect(ctx) {
   };
 }
 
+export async function collect(ctx) {
+  return shape(ctx, await aggregate(ctx));
+}
+
 export function human(report) {
-  const lines = [periodLine(report.window)];
+  const out = [periodLine(report.window)];
 
   for (const [key, title] of [
     ['sessions', 'ПАРАЛЛЕЛЬНЫЕ СЕССИИ (окна Claude Code)'],
     ['agents', 'ВСЕ АГЕНТЫ (сессии + субагенты)'],
   ]) {
     const s = report[key];
-    lines.push(
+    out.push(
       '',
-      `=== ${title} ===`,
-      `  агент-часов         ${fixed(s.agent_hours, 1)}`,
-      `  календарное время   ${fixed(s.wall_hours, 1)} ч`,
-      `  средний параллелизм ${fixed(s.concurrency)}`,
-      `  пик одновременно    ${s.peak}`,
-      '  распределение календарного времени:',
+      `${title}:`,
+      table([
+        ['Агент-часов', fixed(s.agent_hours, 1)],
+        ['Календарное время', `${fixed(s.wall_hours, 1)} ч`],
+        ['Средний параллелизм', `×${fixed(s.concurrency)}`],
+        ['Пик одновременно', String(s.peak)],
+      ], { align: ['left', 'right'] }),
+      table(
+        Object.entries(s.levels).map(([level, hours]) => [
+          level, `${fixed(hours)} ч`,
+          `${fixed(s.wall_hours ? (hours / s.wall_hours) * 100 : 0, 1)}%`,
+        ]),
+        { head: ['Одновременно', 'Времени', 'Доля'], align: ['right', 'right', 'right'] },
+      ),
     );
-    for (const [level, hours] of Object.entries(s.levels)) {
-      const share = s.wall_hours ? (hours / s.wall_hours) * 100 : 0;
-      lines.push(`    ${padStart(level, 2)} одновременно: ${padStart(fixed(hours), 6)} ч  (${padStart(fixed(share, 1), 5)}%)`);
-    }
   }
 
-  lines.push('', '=== по дням (сессии) ===');
-  for (const [day, s] of Object.entries(report.daily_sessions)) {
-    lines.push(`  ${day}: агент-часов ${padStart(fixed(s.agent_hours), 5)} | календарных `
-      + `${padStart(fixed(s.wall_hours), 5)} | ср. ${fixed(s.concurrency)} | пик ${s.peak} | `
-      + `≥2 сессий: ${fixed(s.multi_hours)} ч`);
-  }
-  return lines.join('\n');
+  out.push(
+    '',
+    'По дням (сессии):',
+    table(
+      Object.entries(report.daily_sessions).map(([day, s]) => [
+        day, fixed(s.agent_hours), fixed(s.wall_hours), `×${fixed(s.concurrency)}`,
+        String(s.peak), `${fixed(s.multi_hours)} ч`,
+      ]),
+      { head: ['День', 'Агент-ч', 'Календ.', 'Паралл.', 'Пик', '≥2 сессий'],
+        align: ['left', 'right', 'right', 'right', 'right', 'right'] },
+    ),
+  );
+  return out.join('\n');
 }
 
 export async function run(ctx, options) {

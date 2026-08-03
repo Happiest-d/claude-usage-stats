@@ -5,8 +5,9 @@ export function num(n) {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+/** Дробное с русской запятой — вывод читают люди, машинам есть --json. */
 export function fixed(n, digits = 2) {
-  return Number(n ?? 0).toFixed(digits);
+  return Number(n ?? 0).toFixed(digits).replace('.', ',');
 }
 
 /** Дополняет строку до ширины с учётом того, что кириллица здесь однобайтовая по ширине. */

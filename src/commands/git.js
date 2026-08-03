@@ -41,14 +41,42 @@ export function parseShortstat(text) {
   return [files, added, removed];
 }
 
-/** Коммиты автора за рабочую неделю (пн 00:00 — сб 00:00). */
-function weekStats(clock, repo, emails, monday, friday) {
-  const until = clock.day(parseRange(clock, monday, friday).end);
-  const base = ['log', '--all', `--since=${monday} 00:00`, `--until=${until} 00:00`,
+/** Коммиты автора за период [from 00:00, to+1 00:00). */
+export function rangeStats(clock, repo, emails, from, to) {
+  const until = clock.day(parseRange(clock, from, to).end);
+  const base = ['log', '--all', `--since=${from} 00:00`, `--until=${until} 00:00`,
     ...emails.map((email) => `--author=${email}`)];
   const shas = new Set(git(repo, [...base, '--pretty=%h']).split('\n').filter(Boolean));
   const [files, added, removed] = parseShortstat(git(repo, [...base, '--shortstat', '--pretty=format:']));
   return { commits: shas.size, files, added, removed };
+}
+
+/** Суммарные коммиты по всем репозиториям за период целиком. */
+export function collectRange(ctx, repos, emails) {
+  const total = { commits: 0, files: 0, added: 0, removed: 0, repos: 0 };
+  for (const raw of repos) {
+    const repo = path.resolve(expand(raw));
+    if (!fs.existsSync(path.join(repo, '.git'))) {
+      process.stderr.write(`пропускаю ${repo}: не git-репозиторий\n`);
+      continue;
+    }
+    const who = emails.length ? emails : defaultEmails(repo);
+    if (who.length === 0) {
+      process.stderr.write(`пропускаю ${repo}: не задан автор и пуст user.email\n`);
+      continue;
+    }
+    try {
+      const stat = rangeStats(ctx.clock, repo, who, ctx.from, ctx.to);
+      total.commits += stat.commits;
+      total.files += stat.files;
+      total.added += stat.added;
+      total.removed += stat.removed;
+      total.repos += 1;
+    } catch (err) {
+      process.stderr.write(`пропускаю ${repo}: ${err.message.trim().split('\n')[0]}\n`);
+    }
+  }
+  return total.repos ? total : null;
 }
 
 const expand = (p) => (p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
@@ -71,7 +99,7 @@ export function collect(ctx, repos, emails) {
     const name = path.basename(repo);
     try {
       result[name] = Object.fromEntries(
-        weeks.map(([monday, friday]) => [monday, weekStats(ctx.clock, repo, who, monday, friday)]),
+        weeks.map(([monday, friday]) => [monday, rangeStats(ctx.clock, repo, who, monday, friday)]),
       );
       result[name]._emails = who;
     } catch (err) {

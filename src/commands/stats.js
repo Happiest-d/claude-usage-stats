@@ -1,157 +1,110 @@
 /** Сводка использования Claude Code за диапазон дат: токены, запросы,
  *  инструменты, правки файлов и активность по дням.
  *
- *  Занятость агента с учётом параллелизма — в команде `concurrency`.
+ *  Занятость агента с учётом параллелизма — в команде `concurrency`,
+ *  всё вместе одним блоком — в `summary`.
  */
+import { aggregate, counters } from '../aggregate.js';
 import { activeHours, round2 } from '../metrics.js';
-import { EDIT_TOOLS, TokenCounter, editedLines, isHumanPrompt, iterRecords, modelOf, toolUses } from '../logs.js';
-import { fixed, num, padEnd, padStart, periodLine } from '../format.js';
+import { fixed, num, periodLine } from '../format.js';
+import { table } from '../table.js';
 
-const bump = (map, key, n = 1) => map.set(key, (map.get(key) ?? 0) + n);
+const asObject = (map) => Object.fromEntries(map ?? []);
 
-function bucket(map, key) {
-  let inner = map.get(key);
-  if (!inner) {
-    inner = new Map();
-    map.set(key, inner);
-  }
-  return inner;
+/** {ключ: Map} → {ключ: объект}, отсортировано по output по убыванию. */
+function byOutput(map) {
+  return Object.fromEntries(
+    [...(map ?? new Map()).entries()]
+      .map(([key, inner]) => [key, asObject(inner)])
+      .sort((a, b) => (b[1].output ?? 0) - (a[1].output ?? 0)),
+  );
 }
 
-const asObject = (map) => Object.fromEntries(map);
+export function shape(ctx, agg) {
+  const t = counters(agg.totals);
+  const days = [...agg.dayTimes.keys()].sort();
 
-export async function collect(ctx) {
-  const totals = new Map();
-  const byDay = new Map();
-  const byModel = new Map();
-  const byProject = new Map();
-  const tools = new Map();
-  const filesTouched = new Set();
-  const dayTimes = new Map();
-  const sessionsByDay = new Map();
-  const tokens = new TokenCounter();
-
-  for await (const rec of iterRecords(ctx.files(), ctx.start, ctx.end)) {
-    const day = ctx.clock.day(rec.t);
-    if (!dayTimes.has(day)) dayTimes.set(day, []);
-    dayTimes.get(day).push(rec.t);
-    if (rec.sessionId && !rec.isSubagent) {
-      if (!sessionsByDay.has(day)) sessionsByDay.set(day, new Set());
-      sessionsByDay.get(day).add(rec.sessionId);
-    }
-
-    if (isHumanPrompt(rec)) {
-      bump(totals, 'prompts');
-      bump(bucket(byDay, day), 'prompts');
-    }
-
-    for (const [name, input] of toolUses(rec)) {
-      bump(tools, name);
-      bump(totals, 'tool_calls');
-      bump(bucket(byDay, day), 'tool_calls');
-      if (EDIT_TOOLS.has(name)) {
-        if (input.file_path) filesTouched.add(input.file_path);
-        const [added, removed] = editedLines(name, input);
-        bump(totals, 'lines_added', added);
-        bump(totals, 'lines_removed', removed);
-      }
-    }
-
-    const usage = tokens.add(rec);
-    if (usage === null) continue;
-    const model = modelOf(rec);
-    for (const [key, value] of Object.entries(usage)) {
-      bump(totals, key, value);
-      bump(bucket(byDay, day), key, value);
-      bump(bucket(byModel, model), key, value);
-      bump(bucket(byProject, rec.project), key, value);
-    }
-    bump(totals, 'api_calls');
-    bump(bucket(byDay, day), 'api_calls');
-    bump(bucket(byModel, model), 'calls');
-    bump(bucket(byProject, rec.project), 'calls');
-    if (rec.isSidechain) bump(totals, 'sub_api_calls');
-  }
-
-  const days = [...dayTimes.keys()].sort();
   const daily = {};
   for (const day of days) {
-    const times = dayTimes.get(day);
+    const times = agg.dayTimes.get(day);
     daily[day] = {
-      ...asObject(byDay.get(day) ?? new Map()),
+      ...asObject(agg.dayStats.get(day)),
       active_h: round2(activeHours(times, ctx.idleGap)),
-      sessions: sessionsByDay.get(day)?.size ?? 0,
+      sessions: agg.daySessions.get(day)?.size ?? 0,
       first: ctx.clock.hhmm(Math.min(...times)),
       last: ctx.clock.hhmm(Math.max(...times)),
     };
   }
 
-  const allSessions = new Set();
-  for (const set of sessionsByDay.values()) for (const id of set) allSessions.add(id);
-  const activeTotal = [...dayTimes.values()].reduce((acc, t) => acc + activeHours(t, ctx.idleGap), 0);
+  const activeTotal = [...agg.dayTimes.values()].reduce((acc, times) => acc + activeHours(times, ctx.idleGap), 0);
 
-  const byOutput = (map) => Object.fromEntries(
-    [...map.entries()]
-      .map(([key, inner]) => [key, asObject(inner)])
-      .sort((a, b) => (b[1].output ?? 0) - (a[1].output ?? 0)),
-  );
-
-  const zero = (key) => totals.get(key) ?? 0;
   return {
     window: ctx.window(),
     totals: {
-      ...asObject(totals),
-      files_touched: filesTouched.size,
-      sessions: allSessions.size,
+      ...asObject(agg.totals.get('')),
+      files_touched: agg.files.get('')?.size ?? 0,
+      sessions: agg.sessions.get('')?.size ?? 0,
       active_h: round2(activeTotal),
     },
     daily,
-    models: byOutput(byModel),
-    projects: byOutput(byProject),
-    tools: Object.fromEntries([...tools.entries()].sort((a, b) => b[1] - a[1])),
-    _empty: days.length === 0 && zero('api_calls') === 0,
+    models: byOutput(agg.models.get('')),
+    projects: byOutput(agg.projects.get('')),
+    tools: Object.fromEntries([...(agg.tools.get('') ?? new Map()).entries()].sort((a, b) => b[1] - a[1])),
+    _empty: days.length === 0 && t.get('api_calls') === 0,
   };
+}
+
+export async function collect(ctx) {
+  return shape(ctx, await aggregate(ctx));
 }
 
 export function human(report) {
   const t = report.totals;
   const get = (key) => t[key] ?? 0;
-  const lines = [
+
+  const out = [
     periodLine(report.window),
     '',
-    `  активных часов   ${fixed(get('active_h'), 1)}`,
-    `  промптов         ${get('prompts')}`,
-    `  сессий           ${get('sessions')}`,
-    `  API-запросов     ${get('api_calls')}  (субагенты: ${get('sub_api_calls')})`,
-    `  инструментов     ${get('tool_calls')}`,
-    `  output-токенов   ${num(get('output'))}`,
-    `  прочитано        ${num(get('cache_read') + get('cache_write') + get('input'))}`,
-    `  файлов затронуто ${get('files_touched')}  (+${get('lines_added')} / −${get('lines_removed')} строк)`,
+    table([
+      ['Активных часов', fixed(get('active_h'), 1)],
+      ['Промптов', num(get('prompts'))],
+      ['Сессий', num(get('sessions'))],
+      ['API-запросов', `${num(get('api_calls'))}  (субагенты: ${num(get('sub_api_calls'))})`],
+      ['Вызовов инструментов', num(get('tool_calls'))],
+      ['Написано токенов', num(get('output'))],
+      ['Прочитано токенов', num(get('cache_read') + get('cache_write') + get('input'))],
+      ['Файлов затронуто', `${num(get('files_touched'))}  (+${num(get('lines_added'))} / −${num(get('lines_removed'))} строк)`],
+    ], { align: ['left', 'right'] }),
     '',
     'По дням:',
+    table(
+      Object.entries(report.daily).map(([day, d]) => [
+        day, fixed(d.active_h), `${d.first}–${d.last}`,
+        num(d.prompts ?? 0), num(d.tool_calls ?? 0), num(d.output ?? 0),
+      ]),
+      { head: ['День', 'Часов', 'Интервал', 'Промптов', 'Инстр.', 'Output'],
+        align: ['left', 'right', 'left', 'right', 'right', 'right'] },
+    ),
+    '',
+    'Модели:',
+    table(
+      Object.entries(report.models).map(([model, v]) => [model, num(v.calls ?? 0), num(v.output ?? 0)]),
+      { head: ['Модель', 'Запросов', 'Output'], align: ['left', 'right', 'right'] },
+    ),
+    '',
+    'Инструменты:',
+    table(
+      Object.entries(report.tools).slice(0, 12).map(([name, n]) => [name, num(n)]),
+      { head: ['Инструмент', 'Вызовов'], align: ['left', 'right'] },
+    ),
+    '',
+    'Проекты:',
+    table(
+      Object.entries(report.projects).slice(0, 10).map(([name, v]) => [name, num(v.calls ?? 0), num(v.output ?? 0)]),
+      { head: ['Проект', 'Запросов', 'Output'], align: ['left', 'right', 'right'] },
+    ),
   ];
-
-  for (const [day, d] of Object.entries(report.daily)) {
-    lines.push(`  ${day}  ${padStart(fixed(d.active_h), 5)} ч  ${d.first}–${d.last}  `
-      + `промптов ${padStart(d.prompts ?? 0, 3)}  инстр. ${padStart(d.tool_calls ?? 0, 5)}  `
-      + `output ${padStart(num(d.output ?? 0), 9)}`);
-  }
-
-  lines.push('', 'Модели:');
-  for (const [model, v] of Object.entries(report.models)) {
-    lines.push(`  ${padEnd(model, 32)} ${padStart(v.calls ?? 0, 5)} запросов  output ${padStart(num(v.output ?? 0), 10)}`);
-  }
-
-  lines.push('', 'Инструменты:');
-  for (const [name, n] of Object.entries(report.tools).slice(0, 12)) {
-    lines.push(`  ${padEnd(name, 32)} ${n}`);
-  }
-
-  lines.push('', 'Проекты:');
-  for (const [name, v] of Object.entries(report.projects).slice(0, 10)) {
-    lines.push(`  ${padEnd(name, 48)} ${padStart(v.calls ?? 0, 5)} запросов`);
-  }
-  return lines.join('\n');
+  return out.join('\n');
 }
 
 export async function run(ctx, options) {
