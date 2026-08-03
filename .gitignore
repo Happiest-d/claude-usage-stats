@@ -3,8 +3,6 @@ weekly.json
 git.json
 dashboard.html
 *.html
-!template.html
+!src/template.html
 
-__pycache__/
-*.pyc
-.venv/
+node_modules/
