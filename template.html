@@ -1,0 +1,497 @@
+<title>Claude Code — статистика работы</title>
+<style>
+:root {
+  color-scheme: light;
+  --plane:      #f2f4f6;
+  --surface:    #fbfcfd;
+  --surface-2:  #f6f8f9;
+  --ink:        #0e1418;
+  --ink-2:      #4c565e;
+  --ink-muted:  #7d8790;
+  --hairline:   #dfe4e8;
+  --grid:       #e7ebee;
+  --accent:     #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --l1: #86b6ef; --l2: #5598e7; --l3: #2a78d6; --l4: #1c5cab; --l5: #104281;
+  --shadow: 0 1px 2px rgba(14,20,24,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --plane:      #0c0f11;
+    --surface:    #14181b;
+    --surface-2:  #1a1f22;
+    --ink:        #f2f5f7;
+    --ink-2:      #b3bcc3;
+    --ink-muted:  #838d95;
+    --hairline:   #262c31;
+    --grid:       #23292e;
+    --accent:     #5598e7;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    /* на тёмном фоне ordinal-рампа идёт в обратную сторону: больше сессий — светлее */
+    --l1: #256abf; --l2: #3987e5; --l3: #6da7ec; --l4: #9ec5f4; --l5: #cde2fb;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane:      #0c0f11;
+  --surface:    #14181b;
+  --surface-2:  #1a1f22;
+  --ink:        #f2f5f7;
+  --ink-2:      #b3bcc3;
+  --ink-muted:  #838d95;
+  --hairline:   #262c31;
+  --grid:       #23292e;
+  --accent:     #5598e7;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --l1: #256abf; --l2: #3987e5; --l3: #6da7ec; --l4: #9ec5f4; --l5: #cde2fb;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.mono, .num, th, td, .axis, .tick, .tile-value, .legend, .eyebrow {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 40px 24px 72px; display: flex; flex-direction: column; gap: 28px; }
+
+header.page { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--hairline); padding-bottom: 24px; }
+.eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-muted); }
+h1 { margin: 0; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.15; font-weight: 620; letter-spacing: -.02em; text-wrap: balance; }
+.lede { margin: 0; max-width: 68ch; color: var(--ink-2); font-size: 15px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: 6px; padding: 14px 16px 15px;
+        display: flex; flex-direction: column; gap: 3px; box-shadow: var(--shadow); }
+.tile-label { font-size: 12px; color: var(--ink-2); }
+.tile-value { font-size: 27px; font-weight: 600; line-height: 1.1; letter-spacing: -.02em; }
+.tile-note { font-size: 11.5px; color: var(--ink-muted); }
+
+section.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 6px; padding: 20px 22px 22px;
+               display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow); }
+.card-head { display: flex; flex-direction: column; gap: 4px; }
+h2 { margin: 0; font-size: 16.5px; font-weight: 620; letter-spacing: -.01em; }
+.sub { margin: 0; font-size: 13px; color: var(--ink-2); max-width: 74ch; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+
+.chart { display: flex; flex-direction: column; gap: 9px; }
+.row { display: grid; grid-template-columns: 92px 1fr; gap: 14px; align-items: center; }
+.row .tick { font-size: 12px; color: var(--ink-2); text-align: right; }
+.track { position: relative; height: 26px; background: linear-gradient(to right, var(--grid) 1px, transparent 1px) 0 0 / 25% 100%;
+         border-left: 1px solid var(--hairline); }
+.bars { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.bar { height: 100%; border-radius: 0 4px 4px 0; display: flex; align-items: center; cursor: default; }
+.bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.grp { display: flex; flex-direction: column; gap: 3px; }
+.grp .bar { height: 11px; }
+.stack { display: flex; height: 22px; gap: 2px; }
+.stack .seg:last-child { border-radius: 0 4px 4px 0; }
+.seg { height: 100%; cursor: default; }
+.seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.val { font-size: 12px; color: var(--ink-2); padding-left: 8px; white-space: nowrap; }
+
+.days { display: grid; gap: 4px; align-items: end; height: 130px; }
+.day { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; gap: 4px; }
+.day .col { background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; cursor: default; }
+.day.wk-b .col { opacity: .72; }
+.daylabels { display: grid; gap: 4px; font-size: 10px; color: var(--ink-muted); text-align: center; }
+
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; min-width: 640px; }
+th, td { text-align: right; padding: 7px 7px; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); font-weight: 500;
+           border-bottom: 1px solid var(--ink-muted); }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr:last-child td { border-bottom: none; font-weight: 600; }
+
+.notes { font-size: 13px; color: var(--ink-2); }
+.notes ul { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; }
+.notes code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+              background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 3px; padding: 1px 5px; }
+
+#tip { position: fixed; z-index: 20; pointer-events: none; opacity: 0; transform: translateY(-3px);
+       transition: opacity .09s ease; background: var(--surface); color: var(--ink); border: 1px solid var(--hairline);
+       border-radius: 5px; padding: 7px 10px; font-size: 12px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+       max-width: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+#tip.on { opacity: 1; transform: translateY(0); }
+#tip b { font-weight: 620; }
+@media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
+@media (max-width: 860px) {
+  .wrap { padding: 28px 16px 56px; }
+  .row { grid-template-columns: 72px 1fr; gap: 10px; }
+  .days { height: 110px; }
+  /* подписи значений вылезали бы за край — числа остаются в тултипах и таблице */
+  .val { display: none; }
+}
+</style>
+
+<div class="wrap">
+  <header class="page">
+    <div class="eyebrow" id="eyebrow">Claude Code · логи сессий</div>
+    <h1 id="h1">Сколько работы выполнил агент</h1>
+    <p class="lede" id="lede"></p>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Время работы агента</h2>
+      <p class="sub">Суммарно по всем сессиям против календарного времени, когда работала хотя бы одна.
+        Разница между полосами — это параллельная работа.</p>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--s1)"></i>агент-часы (сумма по сессиям)</span>
+      <span><i class="swatch" style="background:var(--s2)"></i>календарное время (≥1 сессия)</span>
+    </div>
+    <div class="chart" id="c-hours"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Параллелизм: сколько сессий работали одновременно</h2>
+      <p class="sub">Календарное время разложено по числу сессий, которые в этот момент реально работали.
+        Насыщенность растёт вместе с количеством.</p>
+    </div>
+    <div class="legend" id="l-levels"></div>
+    <div class="chart" id="c-levels"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Объём вывода</h2>
+      <p class="sub">Output-токены — всё, что модель написала: код, правки, рассуждения, ответы.</p>
+    </div>
+    <div class="chart" id="c-output"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Чем занимался агент</h2>
+      <p class="sub">Вызовы инструментов. Bash — это запуск тестов, git и статических проверок.</p>
+    </div>
+    <div class="legend" id="l-tools"></div>
+    <div class="chart" id="c-tools"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Модели</h2>
+      <p class="sub">Доля API-запросов по моделям.</p>
+    </div>
+    <div class="legend" id="l-models"></div>
+    <div class="chart" id="c-models"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Активность по дням</h2>
+      <p class="sub">Часы, в которые в логах шла работа. Чередование насыщенности разделяет недели.</p>
+    </div>
+    <div class="days" id="c-days"></div>
+    <div class="daylabels" id="c-daylabels"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Все метрики по неделям</h2>
+      <p class="sub">Та же выборка в числах — источник для всех графиков выше. «Пик сес./аг.» — максимум
+        одновременно работавших сессий и, через дробь, отдельных агентов вместе с субагентами.</p>
+    </div>
+    <div class="tablewrap"><table id="tbl"></table></div>
+  </section>
+
+  <section class="card notes">
+    <div class="card-head"><h2>Как это посчитано</h2></div>
+    <ul id="method"></ul>
+  </section>
+</div>
+
+<div id="tip" role="status" aria-live="polite"></div>
+
+<script>
+const DATA = __DATA__;
+const W = DATA.weeks, D = DATA.daily;
+const fmt = n => n.toLocaleString('ru-RU');
+const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(2).replace('.', ',') + ' M' : n >= 1e3 ? Math.round(n / 1e3) + ' K' : String(n);
+const h = n => n.toFixed(1).replace('.', ',') + ' ч';
+const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
+const LEVELS = ['var(--l1)', 'var(--l2)', 'var(--l3)', 'var(--l4)', 'var(--l5)'];
+
+const tip = document.getElementById('tip');
+function bindTip(el, html) {
+  el.tabIndex = 0;
+  const show = e => {
+    tip.innerHTML = html;
+    tip.classList.add('on');
+    const r = el.getBoundingClientRect();
+    const x = (e && e.clientX != null ? e.clientX : r.left + r.width / 2);
+    tip.style.left = Math.min(Math.max(10, x + 12), innerWidth - tip.offsetWidth - 10) + 'px';
+    tip.style.top = Math.max(10, r.top - tip.offsetHeight - 10) + 'px';
+  };
+  el.addEventListener('mouseenter', show);
+  el.addEventListener('mousemove', show);
+  el.addEventListener('focus', show);
+  const hide = () => tip.classList.remove('on');
+  el.addEventListener('mouseleave', hide);
+  el.addEventListener('blur', hide);
+}
+function el(tag, cls, parent) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function row(host, label) {
+  const r = el('div', 'row', host);
+  el('div', 'tick', r).textContent = label;
+  return el('div', 'bars', el('div', 'track', r));
+}
+function legend(host, items) {
+  items.forEach(([name, color]) => {
+    const s = el('span', null, host);
+    el('i', 'swatch', s).style.background = color;
+    s.appendChild(document.createTextNode(name));
+  });
+}
+function endLabel(bars, pct, text) {
+  const v = el('div', 'val', bars);
+  v.style.position = 'absolute';
+  v.style.left = 'calc(' + pct + '% + 2px)';
+  v.textContent = text;
+}
+
+// ── шапка ───────────────────────────────────────────────────────
+document.title = 'Claude Code: ' + DATA.title + ' — статистика работы';
+document.getElementById('eyebrow').textContent = 'Claude Code · логи сессий · ' + DATA.title;
+document.getElementById('h1').textContent = 'Сколько работы выполнил агент: ' + DATA.title;
+document.getElementById('lede').textContent =
+  'Понедельный срез по рабочим дням (пн–пт). «Час работы агента» — время от промпта ' +
+  'до ответа, завершающего ход; ожидание ввода и паузы длиннее ' + DATA.idleMin +
+  ' минут вычтены. Данные собраны из локальных логов сессий' +
+  (DATA.hasGit ? ', коммиты — из git.' : '.');
+
+// ── сводка ──────────────────────────────────────────────────────
+const sum = k => W.reduce((a, w) => a + (w[k] || 0), 0);
+const workdays = D.length || 1;
+const tiles = [
+  ['Часов работы агента', h(sum('agent_h')), 'сумма по сессиям, ' + W.length + ' нед.'],
+  ['Промптов', fmt(sum('prompts')), Math.round(sum('prompts') / workdays) + ' в рабочий день'],
+  ['Написано токенов', fmtK(sum('output')), 'output за период'],
+  ['Вызовов инструментов', fmt(sum('tool_calls')),
+    (sum('prompts') ? Math.round(sum('tool_calls') / sum('prompts')) : 0) + ' на промпт'],
+];
+if (DATA.hasGit) tiles.push(['Коммитов в git', fmt(sum('commits')),
+  '+' + fmt(sum('git_added')) + ' / −' + fmt(sum('git_removed')) + ' строк']);
+tiles.push(['Файлов затронуто', fmt(sum('files')), 'уникальных путей в Edit/Write']);
+const tilesHost = document.getElementById('tiles');
+tiles.forEach(([label, value, note]) => {
+  const t = el('div', 'tile', tilesHost);
+  el('div', 'tile-label', t).textContent = label;
+  el('div', 'tile-value', t).textContent = value;
+  el('div', 'tile-note', t).textContent = note;
+});
+
+// ── часы ────────────────────────────────────────────────────────
+{
+  const host = document.getElementById('c-hours');
+  const max = Math.max(...W.map(w => w.agent_h)) * 1.12 || 1;
+  W.forEach(w => {
+    const bars = row(host, w.label);
+    const g = el('div', 'grp', bars);
+    [['agent_h', 'var(--s1)', 'агент-часы'], ['wall_h', 'var(--s2)', 'календарное время']].forEach(([k, c, name]) => {
+      const line = el('div', 'bar', g);
+      line.style.width = (w[k] / max * 100) + '%';
+      line.style.background = c;
+      bindTip(line, '<b>' + w.label + '</b><br>' + name + ': ' + h(w[k]));
+    });
+    endLabel(bars, w.agent_h / max * 100, h(w.agent_h) + ' · ×' + w.conc.toFixed(2).replace('.', ','));
+  });
+}
+
+// ── параллелизм ─────────────────────────────────────────────────
+{
+  const host = document.getElementById('c-levels');
+  const maxLevel = Math.max(2, ...W.map(w => Math.max(...Object.keys(w.levels).map(Number), 1)));
+  const shown = Math.min(maxLevel, LEVELS.length);
+  legend(document.getElementById('l-levels'),
+    Array.from({length: shown}, (_, i) => [(i + 1) + (i === 0 ? ' сессия' : i < 4 ? ' сессии' : ' сессий'), LEVELS[i]]));
+  const max = Math.max(...W.map(w => w.wall_h)) * 1.12 || 1;
+  W.forEach(w => {
+    const bars = row(host, w.label);
+    const st = el('div', 'stack', bars);
+    st.style.width = (w.wall_h / max * 100) + '%';
+    Object.keys(w.levels).map(Number).sort((a, b) => a - b).forEach(n => {
+      const v = w.levels[String(n)];
+      if (v <= 0) return;
+      const seg = el('div', 'seg', st);
+      seg.style.flex = v;
+      seg.style.background = LEVELS[Math.min(n, LEVELS.length) - 1];
+      bindTip(seg, '<b>' + w.label + '</b><br>' + n + ' ' + (n === 1 ? 'сессия' : 'сессий') +
+        ' одновременно: ' + h(v) + '<br>' + Math.round(v / w.wall_h * 100) + '% календарного времени');
+    });
+    endLabel(bars, w.wall_h / max * 100, 'пик ' + w.peak_sessions + ' · ≥2: ' + h(w.multi_h));
+  });
+}
+
+// ── output ──────────────────────────────────────────────────────
+{
+  const host = document.getElementById('c-output');
+  const max = Math.max(...W.map(w => w.output)) * 1.18 || 1;
+  W.forEach(w => {
+    const bars = row(host, w.label);
+    const b = el('div', 'bar', bars);
+    b.style.width = (w.output / max * 100) + '%';
+    b.style.background = 'var(--s1)';
+    bindTip(b, '<b>' + w.label + '</b><br>output: ' + fmt(w.output) + ' токенов<br>прочитано контекста: ' +
+      fmtK(w.cache_read + w.cache_write + w.input) + '<br>API-запросов: ' + fmt(w.api));
+    endLabel(bars, w.output / max * 100, fmtK(w.output));
+  });
+}
+
+// ── инструменты ─────────────────────────────────────────────────
+{
+  const host = document.getElementById('c-tools');
+  const names = Object.keys(W[0].tools);
+  legend(document.getElementById('l-tools'), names.map((n, i) => [n, SERIES[i % SERIES.length]]));
+  const max = Math.max(...W.map(w => w.tool_calls)) * 1.14 || 1;
+  W.forEach(w => {
+    const bars = row(host, w.label);
+    const st = el('div', 'stack', bars);
+    st.style.width = (w.tool_calls / max * 100) + '%';
+    names.forEach((n, i) => {
+      const v = w.tools[n];
+      if (!v) return;
+      const seg = el('div', 'seg', st);
+      seg.style.flex = v;
+      seg.style.background = SERIES[i % SERIES.length];
+      bindTip(seg, '<b>' + w.label + '</b><br>' + n + ': ' + fmt(v) + ' вызовов<br>' +
+        Math.round(v / w.tool_calls * 100) + '% всех инструментов');
+    });
+    endLabel(bars, w.tool_calls / max * 100, fmt(w.tool_calls));
+  });
+}
+
+// ── модели ──────────────────────────────────────────────────────
+{
+  const host = document.getElementById('c-models');
+  const totalCalls = {};
+  W.forEach(w => Object.entries(w.models).forEach(([m, n]) => totalCalls[m] = (totalCalls[m] || 0) + n));
+  const order = Object.keys(totalCalls).sort((a, b) => totalCalls[b] - totalCalls[a]).slice(0, SERIES.length);
+  const color = m => SERIES[order.indexOf(m)] || 'var(--ink-muted)';
+  legend(document.getElementById('l-models'), order.map(m => [m, color(m)]));
+  W.forEach(w => {
+    const bars = row(host, w.label);
+    const total = Object.values(w.models).reduce((a, b) => a + b, 0) || 1;
+    const st = el('div', 'stack', bars);
+    st.style.width = '100%';
+    order.concat(Object.keys(w.models).filter(m => !order.includes(m))).forEach(m => {
+      const v = w.models[m] || 0;
+      if (!v) return;
+      const seg = el('div', 'seg', st);
+      seg.style.flex = v;
+      seg.style.background = color(m);
+      bindTip(seg, '<b>' + w.label + '</b><br>' + m + ': ' + fmt(v) + ' запросов (' +
+        Math.round(v / total * 100) + '%)');
+    });
+  });
+}
+
+// ── дни ─────────────────────────────────────────────────────────
+{
+  const host = document.getElementById('c-days');
+  const labels = document.getElementById('c-daylabels');
+  const cols = 'repeat(' + D.length + ', 1fr)';
+  host.style.gridTemplateColumns = cols;
+  labels.style.gridTemplateColumns = cols;
+  const max = Math.max(...D.map(d => d.active_h)) || 1;
+  const wkIndex = {};
+  W.forEach((w, i) => wkIndex[w.key] = i);
+  D.forEach(d => {
+    const cell = el('div', 'day' + (wkIndex[d.week] % 2 ? ' wk-b' : ''), host);
+    const col = el('div', 'col', cell);
+    col.style.height = Math.max(2, d.active_h / max * 100) + '%';
+    bindTip(col, '<b>' + d.date.slice(8) + '.' + d.date.slice(5, 7) + '</b><br>активно: ' + h(d.active_h) +
+      '<br>окно: ' + d.first + '–' + d.last + '<br>промптов: ' + d.prompts +
+      '<br>инструментов: ' + fmt(d.tool_calls));
+    el('div', null, labels).textContent = d.date.slice(8);
+  });
+}
+
+// ── таблица ─────────────────────────────────────────────────────
+{
+  const t = document.getElementById('tbl');
+  const cols = [
+    ['Неделя', w => w.label],
+    ['Агент-часы', w => h(w.agent_h)],
+    ['Кал. время', w => h(w.wall_h)],
+    ['Паралл.', w => '×' + w.conc.toFixed(2).replace('.', ',')],
+    ['Пик сес./аг.', w => w.peak_sessions + ' / ' + w.peak_agents],
+    ['Сессий', w => fmt(w.sessions)],
+    ['Промптов', w => fmt(w.prompts)],
+    ['API', w => fmt(w.api)],
+    ['Инстр.', w => fmt(w.tool_calls)],
+    ['Output', w => fmtK(w.output)],
+    ['Контекст', w => fmtK(w.cache_read + w.cache_write + w.input)],
+    ['Файлов', w => fmt(w.files)],
+  ];
+  if (DATA.hasGit) cols.push(
+    ['Коммитов', w => fmt(w.commits)],
+    ['Строк git', w => '+' + fmt(w.git_added) + ' / −' + fmt(w.git_removed)]);
+
+  const hr = el('tr', null, el('thead', null, t));
+  cols.forEach(c => el('th', null, hr).textContent = c[0]);
+  const tb = el('tbody', null, t);
+  W.forEach(w => {
+    const tr = el('tr', null, tb);
+    cols.forEach(c => el('td', null, tr).textContent = c[1](w));
+  });
+  const totals = {
+    label: 'Всего', agent_h: sum('agent_h'), wall_h: sum('wall_h'),
+    conc: sum('wall_h') ? sum('agent_h') / sum('wall_h') : 0,
+    peak_sessions: Math.max(...W.map(w => w.peak_sessions)),
+    peak_agents: Math.max(...W.map(w => w.peak_agents)),
+    sessions: sum('sessions'), prompts: sum('prompts'), api: sum('api'), tool_calls: sum('tool_calls'),
+    output: sum('output'), cache_read: sum('cache_read'), cache_write: sum('cache_write'), input: sum('input'),
+    files: sum('files'), commits: sum('commits'), git_added: sum('git_added'), git_removed: sum('git_removed'),
+  };
+  const tr = el('tr', null, tb);
+  cols.forEach(c => el('td', null, tr).textContent = c[1](totals));
+}
+
+// ── методика ────────────────────────────────────────────────────
+{
+  const items = [
+    'Источник — <code>~/.claude/projects/**/*.jsonl</code>: локальные логи Claude Code CLI. ' +
+      'Работа через веб, десктоп и IDE-расширение сюда не попадает, как и агенты, запущенные ' +
+      'в контейнере или на другой машине со своим HOME.',
+    'Токены дедуплицированы по <code>requestId</code>: одно API-сообщение пишется в лог несколькими ' +
+      'строками с общим usage.',
+    'Интервал работы открывается на промпте и закрывается ответом со <code>stop_reason: end_turn</code>. ' +
+      'Разрывы длиннее ' + DATA.idleMin + ' минут вырезаются — в том числе долгое ожидание подтверждения ' +
+      'команды, так что реальная занятость может быть чуть выше.',
+    'Субагенты пишутся в <code>&lt;сессия&gt;/subagents/</code> и наследуют <code>sessionId</code> родителя: ' +
+      'в метрике сессий их время схлопнуто с родительским, отдельно они видны в пике агентов.',
+    'Строки в «Файлах затронуто» считаются по содержимому Edit/Write: перезапись одного места ' +
+      'учитывается заново, поэтому цифра выше git-диффа.',
+  ];
+  if (DATA.hasGit) items.push('Коммиты считаются по email автора, а не по имени: один человек часто ' +
+    'коммитит под разными написаниями имени.');
+  const host = document.getElementById('method');
+  items.forEach(text => el('li', null, host).innerHTML = text);
+}
+</script>

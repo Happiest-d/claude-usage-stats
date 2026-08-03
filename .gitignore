@@ -1,0 +1,10 @@
+# Результаты прогонов — содержат данные конкретного человека
+weekly.json
+git.json
+dashboard.html
+*.html
+!template.html
+
+__pycache__/
+*.pyc
+.venv/
